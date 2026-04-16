@@ -1,5 +1,4 @@
 google-search-results
 holidays
 python-dotenv
-duffel-api
 requests
