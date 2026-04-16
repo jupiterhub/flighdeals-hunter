@@ -95,7 +95,7 @@ def search_google_explore(window):
         return []
     params = {
         "engine": "google_travel_explore",
-        "departure_id": "LON",
+        "departure_id": "/m/04jpl", # London
         "arrival_area_id": "/m/02j9z", # Europe
         "outbound_date": window["outbound"].isoformat(),
         "return_date": window["return"].isoformat(),
@@ -127,7 +127,7 @@ def verify_deal_with_google_flights(window, dest_iata):
     """Deep dive to check if there is a direct flight in the specific time window using Google Flights API."""
     params = {
         "engine": "google_flights",
-        "departure_id": "LON",
+        "departure_id": "/m/04jpl", # London
         "arrival_id": dest_iata,
         "outbound_date": window["outbound"].isoformat(),
         "return_date": window["return"].isoformat(),
