@@ -36,6 +36,17 @@ CITY_TO_IATA = {
     "Seville": "SVQ", "Valencia": "VLC", "Bratislava": "BTS", "Ljubljana": "LJU"
 }
 
+SMART_BUDGETS = {
+    "ROM": 100, "LIS": 100, "PAR": 80, "AMS": 80, "BCN": 90, "MAD": 90, "PRG": 80, "BER": 80,
+    "CPH": 90, "DUB": 60, "VIE": 90, "BUD": 80, "ATH": 130, "WAW": 80, "KRK": 80, "VCE": 90,
+    "MIL": 80, "NAP": 90, "FLR": 100, "MUC": 90, "FRA": 80, "HAM": 80, "ZRH": 100, "GVA": 90,
+    "BRU": 80, "STO": 100, "OSL": 100, "HEL": 100, "REK": 130, "AGP": 100, "ALC": 90, "FAO": 90,
+    "OPO": 90, "IBZ": 100, "PMI": 90, "NCE": 90, "LYS": 80, "MRS": 80, "TLS": 80, "BOD": 80,
+    "RIX": 80, "TLL": 90, "VNO": 80, "SOF": 80, "BUH": 80, "BEG": 90, "ZAG": 90, "DBV": 100,
+    "SPU": 100, "MLA": 100, "LCA": 130, "TFS": 130, "LPA": 130, "ACE": 130, "SVQ": 90, "VLC": 90,
+    "BTS": 80, "LJU": 90
+}
+
 def send_html_email(subject, html_content):
     """Sends a professional HTML email notification."""
     if not all([SENDER_EMAIL, SENDER_PASSWORD]):
@@ -119,15 +130,45 @@ def verify_deal_with_google_flights(window, dest_iata):
         search = GoogleSearch(params)
         results = search.get_dict()
         
-        # Look for flights matching criteria
+        # Check price insights to ensure it's "low"
+        price_insights = results.get("price_insights", {})
+        price_level = price_insights.get("price_level")
+        
+        # Determine the budget for this specific city
+        max_budget = min(150, SMART_BUDGETS.get(dest_iata, 150))
+        
         flights = results.get("best_flights", []) + results.get("other_flights", [])
         
         for flight in flights:
             price = flight.get("price", 9999)
-            if price <= 150:
-                legs = flight.get("flights", [])
-                airline = legs[0].get("airline", "Unknown Airline") if legs else "Unknown Airline"
-                return {"price": price, "airline": airline}
+            
+            # 1. Price must be under the smart budget and absolute max 150
+            if price > max_budget:
+                continue
+                
+            # 2. If Google provides an insight, trust it (must be 'low')
+            if price_level and price_level != "low":
+                continue
+
+            legs = flight.get("flights", [])
+            if not legs:
+                continue
+                
+            # 3. Check Outbound Arrival Time (must land before 16:00)
+            outbound = legs[0]
+            arr_time_str = outbound.get("arrival_airport", {}).get("time", "")
+            if arr_time_str:
+                try:
+                    # Format is usually "2026-05-23 15:30"
+                    arr_hour = int(arr_time_str.split(" ")[1].split(":")[0])
+                    if arr_hour >= 16:
+                        continue # Arrives too late, skip
+                except:
+                    pass
+            
+            airline = outbound.get("airline", "Unknown Airline")
+            return {"price": price, "airline": airline, "insight": price_level or "Budget Match"}
+            
         return None
     except Exception as e:
         print(f"Google Flights verification failed for {dest_iata}: {e}")
@@ -137,12 +178,13 @@ def main():
     print("--- Flight Hunter 3.0: Dual SerpApi Mode ---")
     all_windows = get_travel_windows(2026)
     
-    # Strategy: Skip next 14 days, scan next 10 weekends + all Bank Holidays
-    # This keeps us under the 250/month SerpApi credit limit (approx. ~30 credits per run, 8 runs/month = 240)
+    # Strategy: Skip next 14 days, scan next 6 weekends + all Bank Holidays (~10 windows total)
+    # 10 windows * 3 calls max (1 explore + 2 deep dives) = 30 credits per run
+    # 30 credits * 8 runs/month (Tue & Thu) = 240 credits/month (Safely under 250 limit)
     two_weeks_out = date.today() + timedelta(days=14)
     bh_windows = [w for w in all_windows if "Bank Holiday" in w["name"]]
     std_windows = [w for w in all_windows if "Standard Weekend" in w["name"] and w["outbound"] >= two_weeks_out]
-    target_windows = sorted(bh_windows + std_windows[:10], key=lambda x: x["outbound"])
+    target_windows = sorted(bh_windows + std_windows[:6], key=lambda x: x["outbound"])
 
     if not target_windows:
         print("No target windows found.")
@@ -156,23 +198,22 @@ def main():
         print(f"Scanning: {window['outbound']}...")
         explore_results = search_google_explore(window)
         
-        # We only verify the TOP 3 destinations to save API credits
+        # We only verify the TOP 2 destinations to strictly save API credits
         verified = False
-        for g_deal in explore_results[:3]:
+        for g_deal in explore_results[:2]:
             dest_name = g_deal.get("name", "Unknown")
             iata_code = CITY_TO_IATA.get(dest_name)
             
             if iata_code:
-                # Deep dive with Google Flights to verify the strict time window
+                # Deep dive with Google Flights to verify the strict time window and smart budget
                 verified_deal = verify_deal_with_google_flights(window, iata_code)
                 if verified_deal:
-                    insight = "Deal" if verified_deal['price'] < 100 else "Typical"
                     all_deals.append({
                         "dest": dest_name, 
                         "price": verified_deal['price'], 
                         "dates": f"{window['outbound']} to {window['return']}",
                         "notes": window["name"], 
-                        "insight": insight, 
+                        "insight": verified_deal['insight'], 
                         "source": "Google Flights",
                         "airline": verified_deal['airline'],
                         "link": f"https://www.google.com/travel/flights?q=Flights%20to%20{dest_name}%20from%20LON%20on%20{window['outbound']}%20through%20{window['return']}"
@@ -181,7 +222,7 @@ def main():
                     break # Stop at the first verified deal for this weekend to save credits
 
     if not all_deals:
-        send_html_email("🔍 No Deals Found Today", f"<p>Searched {range_str}. No direct flights under £150 with 09:00-13:00 departure and 14:00-22:00 return were found.</p>")
+        send_html_email("🔍 No Deals Found Today", f"<p>Searched {range_str}. No direct flights matching your Smart Budget, 'low' pricing, and strict timing (Arrive before 16:00) were found.</p>")
     else:
         # Sort and deduplicate
         all_deals = sorted(all_deals, key=lambda x: x['price'])
