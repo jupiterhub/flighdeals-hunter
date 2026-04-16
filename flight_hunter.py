@@ -100,35 +100,58 @@ def search_flights(window):
     search = GoogleSearch(params)
     results = search.get_dict()
     
-    # Extract flight options
-    # Note: SerpApi results for travel_explore are in a specific format
-    destinations = results.get("flights", [])
+    # Extract flight options from 'destinations' key for the explore engine
+    destinations = results.get("destinations", [])
     return destinations
 
 def main():
     print("--- Flight Hunter: London to Europe < £100 ---")
-    windows = get_travel_windows(2026)
+    
+    # Get all windows for 2026
+    all_windows = get_travel_windows(2026)
+    
+    # FILTER WINDOWS TO SAVE API CREDITS
+    # 1. Always include all future Bank Holidays (these are the high-value targets)
+    # 2. Include only the next 4 standard weekends (the most relevant ones)
+    
+    bh_windows = [w for w in all_windows if "Bank Holiday" in w["name"]]
+    std_windows = [w for w in all_windows if "Standard Weekend" in w["name"]]
+    
+    # Only take the next 4 standard weekends
+    target_std_windows = std_windows[:4]
+    
+    # Combine them
+    target_windows = bh_windows + target_std_windows
+    
+    # Remove duplicates and sort by date
+    # (Since some BH might be in the next 4 weeks)
+    unique_windows = []
+    seen_dates = set()
+    for w in sorted(target_windows, key=lambda x: x["outbound"]):
+        if w["outbound"] not in seen_dates:
+            unique_windows.append(w)
+            seen_dates.add(w["outbound"])
+
+    print(f"Plan: Scanning {len(unique_windows)} high-priority travel windows to save API credits.")
     
     all_deals = []
     
-    # Limit to first few for demo/test purposes or process all
-    # For a daily script, you might want to process all future windows
-    for window in windows:
-        # For this script, we'll only search for windows in May to save API credits
-        # But you can remove this check to scan the whole year
-        if window["outbound"].month == 5:
-            deals = search_flights(window)
-            for deal in deals:
-                all_deals.append({
-                    "window": window,
-                    "destination": deal.get("destination", "Unknown"),
-                    "price": deal.get("price", "N/A"),
-                    "airline": deal.get("airline", "Unknown"),
-                    "link": f"https://www.google.com/travel/flights?q=Flights%20to%20{deal.get('destination')}%20from%20LON%20on%20{window['outbound']}%20through%20{window['return']}"
-                })
+    for window in unique_windows:
+        deals = search_flights(window)
+        for deal in deals:
+            all_deals.append({
+                "window": window,
+                "destination": deal.get("name", "Unknown"),
+                "price": deal.get("flight_price", "N/A"),
+                "airline": deal.get("airline", "Unknown"),
+                "link": f"https://www.google.com/travel/flights?q=Flights%20to%20{deal.get('name')}%20from%20LON%20on%20{window['outbound']}%20through%20{window['return']}"
+            })
 
     if not all_deals:
         print("No deals found for under £100 with your criteria.")
+        subject = "🔍 Flight Hunter: No deals found today"
+        body = "The Daily Flight Hunter ran but found no results matching your criteria (£100 limit, morning depart, afternoon return) for the rest of 2026."
+        send_email(subject, body)
     else:
         # Build email content
         email_body = "Flight Hunter Results: London to Europe < £100\n\n"

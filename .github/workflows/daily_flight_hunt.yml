@@ -2,8 +2,8 @@ name: Daily Flight Hunt
 
 on:
   schedule:
-    # This runs every day at 08:00 UTC (9:00 AM London time)
-    - cron: '0 8 * * *'
+    # This runs every Tuesday and Thursday at 08:00 UTC
+    - cron: '0 8 * * 2,4'
   workflow_dispatch:
     # This allows you to run it manually from the GitHub "Actions" tab
 
