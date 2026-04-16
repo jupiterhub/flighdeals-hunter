@@ -106,9 +106,21 @@ def search_google_explore(window):
     try:
         search = GoogleSearch(params)
         results = search.get_dict()
-        return results.get("destinations", [])
+        if "error" in results:
+            print(f"  [!] SerpApi Error: {results['error']}")
+        
+        destinations = results.get("destinations", [])
+        if not destinations and "error" not in results:
+            # Print a small snippet of the response to see what's wrong (e.g., search_metadata status)
+            print(f"  [!] Raw SerpApi response keys: {list(results.keys())}")
+            if "search_metadata" in results:
+                print(f"  [!] Status: {results['search_metadata'].get('status')}")
+            if "search_information" in results:
+                print(f"  [!] Search Info: {results['search_information']}")
+        
+        return destinations
     except Exception as e:
-        print(f"Google Explore search failed: {e}")
+        print(f"  [!] Google Explore search failed: {e}")
         return []
 
 def verify_deal_with_google_flights(window, dest_iata):
