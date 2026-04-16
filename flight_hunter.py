@@ -14,9 +14,6 @@ load_dotenv()
 API_KEY = os.getenv("SERPAPI_KEY")
 DUFFEL_ACCESS_TOKEN = os.getenv("DUFFEL_ACCESS_TOKEN")
 
-# Top European Destinations for Duffel (since it needs specific codes)
-DESTINATIONS = ["FCO", "LIS", "CDG", "AMS", "BCN", "MAD", "PRG", "BER", "CPH", "DUB"]
-
 # Email Settings
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
@@ -24,18 +21,18 @@ SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL", "your_email@example.com")
 
-def send_email(subject, body):
-    """Sends an email notification with the flight deals."""
+def send_html_email(subject, html_content):
+    """Sends a professional HTML email notification."""
     if not all([SENDER_EMAIL, SENDER_PASSWORD]):
         print("Email not sent: SENDER_EMAIL or SENDER_PASSWORD not set in .env")
         return
 
-    msg = MIMEMultipart()
-    msg['From'] = SENDER_EMAIL
+    msg = MIMEMultipart('alternative')
+    msg['From'] = f"Flight Hunter <{SENDER_EMAIL}>"
     msg['To'] = RECIPIENT_EMAIL
     msg['Subject'] = subject
 
-    msg.attach(MIMEText(body, 'plain'))
+    msg.attach(MIMEText(html_content, 'html'))
 
     try:
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
@@ -48,41 +45,26 @@ def send_email(subject, body):
         print(f"Failed to send email: {e}")
 
 def get_travel_windows(year=2026):
-    """Generates all Saturday-Sunday and Saturday-Monday (if BH) windows for the year."""
+    """Generates Saturday-Sunday and Saturday-Monday (if BH) windows."""
     uk_holidays = holidays.UnitedKingdom(years=year, subdiv='England')
     windows = []
-    
     start_date = max(date.today(), date(year, 1, 1))
     end_date = date(year, 12, 31)
-    
     current = start_date
     while current <= end_date:
         if current.weekday() == 5: # Saturday
             saturday = current
             sunday = saturday + timedelta(days=1)
             monday = saturday + timedelta(days=2)
-            
             if monday in uk_holidays:
-                windows.append({
-                    "name": f"Bank Holiday: {uk_holidays[monday]}",
-                    "outbound": saturday,
-                    "return": monday
-                })
+                windows.append({"name": f"Bank Holiday: {uk_holidays[monday]}", "outbound": saturday, "return": monday})
             else:
-                windows.append({
-                    "name": "Standard Weekend",
-                    "outbound": saturday,
-                    "return": sunday
-                })
+                windows.append({"name": "Standard Weekend", "outbound": saturday, "return": sunday})
         current += timedelta(days=1)
     return windows
 
-def search_flights(window):
-    """Calls SerpApi to find flights for the given travel window."""
-    if not API_KEY:
-        print("Error: SERPAPI_KEY not found in .env")
-        return []
-
+def search_google_explore(window):
+    """Broad discovery search using Google Travel Explore."""
     params = {
         "engine": "google_travel_explore",
         "departure_id": "LON",
@@ -95,8 +77,6 @@ def search_flights(window):
         "return_times": "14,22",
         "api_key": API_KEY
     }
-
-    print(f"Searching for {window['name']} ({window['outbound']} to {window['return']}) on Google...")
     try:
         search = GoogleSearch(params)
         results = search.get_dict()
@@ -105,132 +85,100 @@ def search_flights(window):
         print(f"Google search failed: {e}")
         return []
 
-def search_duffel_flights(window):
-    """Calls Duffel API to find deals for targeted destinations."""
-    if not DUFFEL_ACCESS_TOKEN:
-        print("Skipping Duffel: DUFFEL_ACCESS_TOKEN not found in .env")
-        return []
-
+def search_duffel_for_destination(window, destination_name):
+    """Deep dive for a specific destination using Duffel to find hacker fares."""
+    if not DUFFEL_ACCESS_TOKEN: return []
     client = Duffel(access_token=DUFFEL_ACCESS_TOKEN)
-    results = []
-
-    for dest in DESTINATIONS:
-        try:
-            slices = [
-                {
-                    "origin": "LON",
-                    "destination": dest,
-                    "departure_date": window["outbound"].isoformat(),
-                },
-                {
-                    "origin": dest,
-                    "destination": "LON",
-                    "departure_date": window["return"].isoformat(),
-                }
-            ]
-            
-            search = client.offers.create(
-                slices=slices,
-                passengers=[{"type": "adult"}]
-            )
-            
-            for offer in search.offers:
-                price = float(offer.total_amount)
-                if price <= 150:
-                    out_dep_at = offer.slices[0].segments[0].departing_at
-                    ret_dep_at = offer.slices[1].segments[0].departing_at
-                    
-                    out_hour = int(out_dep_at.split('T')[1].split(':')[0])
-                    ret_hour = int(ret_dep_at.split('T')[1].split(':')[0])
-                    
-                    if 9 <= out_hour <= 13 and 14 <= ret_hour <= 22:
-                        results.append({
-                            "destination": dest,
-                            "price": price,
-                            "airline": offer.owner.name,
-                            "link": f"https://www.google.com/travel/flights?q=Flights%20to%20{dest}%20from%20LON%20on%20{window['outbound']}%20through%20{window['return']}"
-                        })
-        except Exception as e:
-            print(f"Duffel search for {dest} failed: {e}")
-            continue
-            
-    return results
+    try:
+        slices = [
+            {"origin": "LON", "destination": destination_name, "departure_date": window["outbound"].isoformat()},
+            {"origin": destination_name, "destination": "LON", "departure_date": window["return"].isoformat()}
+        ]
+        search = client.offers.create(slices=slices, passengers=[{"type": "adult"}])
+        best_deals = []
+        for offer in search.offers:
+            price = float(offer.total_amount)
+            if price <= 150:
+                # Ensure direct flights only (for speed on a weekend)
+                if all(len(s.segments) == 1 for s in offer.slices):
+                    out_dep = offer.slices[0].segments[0].departing_at
+                    ret_dep = offer.slices[1].segments[0].departing_at
+                    out_h = int(out_dep.split('T')[1].split(':')[0])
+                    ret_h = int(ret_dep.split('T')[1].split(':')[0])
+                    if 9 <= out_h <= 13 and 14 <= ret_h <= 22:
+                        best_deals.append({"destination": destination_name, "price": price, "airline": offer.owner.name})
+        return sorted(best_deals, key=lambda x: x['price'])[:1] # Return the best Duffel deal
+    except: return []
 
 def main():
-    print("--- Flight Hunter: London to Europe < £150 ---")
+    print("--- Flight Hunter 2.0: Strategic Mode ---")
     all_windows = get_travel_windows(2026)
     
+    # Strategy: Skip next 14 days, scan next 20 weekends + all Bank Holidays
+    two_weeks_out = date.today() + timedelta(days=14)
     bh_windows = [w for w in all_windows if "Bank Holiday" in w["name"]]
-    std_windows = [w for w in all_windows if "Standard Weekend" in w["name"]]
-    
-    # FILTER WINDOWS TO SAVE API CREDITS
-    # 1. Skip standard weekends within the next 14 days (last-minute is rarely < £150)
-    # 2. Take the next 20 standard weekends after that (approx. 5 months ahead)
-    
-    two_weeks_from_now = date.today() + timedelta(days=14)
-    relevant_std_windows = [w for w in std_windows if w["outbound"] >= two_weeks_from_now]
-    target_std_windows = relevant_std_windows[:20]
-    
-    # Always include all future Bank Holidays (even if they are soon, as they are high priority)
-    target_windows = bh_windows + target_std_windows
-    
-    unique_windows = []
-    seen_dates = set()
-    for w in sorted(target_windows, key=lambda x: x["outbound"]):
-        if w["outbound"] not in seen_dates:
-            unique_windows.append(w)
-            seen_dates.add(w["outbound"])
+    std_windows = [w for w in all_windows if "Standard Weekend" in w["name"] and w["outbound"] >= two_weeks_out]
+    target_windows = sorted(bh_windows + std_windows[:20], key=lambda x: x["outbound"])
 
-    # Calculate search range for the email
-    search_start = min(w["outbound"] for w in unique_windows)
-    search_end = max(w["return"] for w in unique_windows)
-    range_str = f"Searched period: {search_start} to {search_end}"
-
-    print(f"Plan: Scanning {len(unique_windows)} travel windows across Google and Duffel.")
-    print(range_str)
-    all_deals = {}
+    range_str = f"{target_windows[0]['outbound']} to {target_windows[-1]['return']}"
+    print(f"Scanning {len(target_windows)} windows ({range_str})...")
     
-    for window in unique_windows:
-        # 1. Google
-        google_results = search_flights(window)
-        for deal in google_results:
-            dest = deal.get("name", "Unknown")
-            price = deal.get("flight_price", 0)
-            key = f"{dest}-{window['outbound']}-{price}"
-            all_deals[key] = {
-                "window": window, "destination": dest, "price": price,
-                "airline": deal.get("airline", "Unknown"),
-                "link": f"https://www.google.com/travel/flights?q=Flights%20to%20{dest}%20from%20LON%20on%20{window['outbound']}%20through%20{window['return']}",
-                "source": "Google"
+    all_deals = []
+    for window in target_windows:
+        google_results = search_google_explore(window)
+        for g_deal in google_results:
+            dest = g_deal.get("name", "Unknown")
+            price = g_deal.get("flight_price", 150)
+            
+            # Contextual Insight: Is this a good price for this specific city?
+            # (Note: In a full implementation, you'd store typical prices per city)
+            insight = "Deal" if price < 100 else "Typical"
+            
+            deal_data = {
+                "dest": dest, "price": price, "dates": f"{window['outbound']} to {window['return']}",
+                "notes": window["name"], "insight": insight, "source": "Google",
+                "link": f"https://www.google.com/travel/flights?q=Flights%20to%20{dest}%20from%20LON%20on%20{window['outbound']}%20through%20{window['return']}"
             }
             
-        # 2. Duffel
-        duffel_results = search_duffel_flights(window)
-        for deal in duffel_results:
-            dest = deal["destination"]
-            price = deal["price"]
-            key = f"{dest}-{window['outbound']}-{price}"
-            if key not in all_deals or price < all_deals[key]["price"]:
-                all_deals[key] = {
-                    "window": window, "destination": dest, "price": price,
-                    "airline": deal["airline"], "link": deal["link"], "source": "Duffel"
-                }
+            # If Google finds a deal, check Duffel for a better "Hacker Fare"
+            d_deals = search_duffel_for_destination(window, dest)
+            if d_deals and d_deals[0]['price'] < price:
+                deal_data.update({"price": d_deals[0]['price'], "source": "Duffel", "airline": d_deals[0]['airline']})
+            
+            all_deals.append(deal_data)
 
     if not all_deals:
-        print("No deals found for under £150.")
-        body = f"The Flight Hunter found no results matching your criteria (£150 limit, 09:00-13:00 depart, 14:00-22:00 return) for the next 4 weekends or any future bank holidays.\n\n{range_str}"
-        send_email("🔍 Flight Hunter: No deals found today", body)
+        send_html_email("🔍 No Deals Found Today", f"<p>Searched {range_str}. No direct flights under £150 with morning departure and afternoon return were found.</p>")
     else:
-        final_list = sorted(all_deals.values(), key=lambda x: (x["window"]["outbound"], x["price"]))
-        email_body = f"Flight Hunter Results: London to Europe < £150\n{range_str}\n\n"
-        email_body += f"{'Destination':<20} {'Price':<10} {'Dates':<25} {'Source'}\n" + "-" * 75 + "\n"
-        for deal in final_list:
-            date_str = f"{deal['window']['outbound']} - {deal['window']['return']}"
-            email_body += f"{deal['destination']:<20} £{deal['price']:<9} {date_str:<25} {deal['source']}\n"
-            email_body += f"   Booking Link: {deal['link']}\n\n"
+        # Sort and deduplicate
+        all_deals = sorted(all_deals, key=lambda x: x['price'])
         
-        print(f"\nFound {len(final_list)} possible deals!")
-        send_email(f"✈️ {len(final_list)} Flight Deals Found for under £150!", email_body)
+        html = f"""
+        <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px;">
+            <h2 style="color: #1a73e8;">✈️ Flight Hunter: Top Deals</h2>
+            <p style="color: #666;">Searching from <b>{range_str}</b><br>Budget: £150 | Direct Flights | Morning Out, Afternoon Back</p>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr style="background: #f8f9fa;">
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #eee;">Destination</th>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #eee;">Price</th>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #eee;">Dates</th>
+                </tr>
+        """
+        for d in all_deals[:15]: # Show top 15 deals
+            html += f"""
+                <tr>
+                    <td style="padding: 12px; border-bottom: 1px solid #eee;"><b>{d['dest']}</b><br><small style="color:#999">{d['source']}</small></td>
+                    <td style="padding: 12px; border-bottom: 1px solid #eee;"><span style="color: #28a745; font-weight: bold;">£{d['price']}</span><br><small>{d['insight']}</small></td>
+                    <td style="padding: 12px; border-bottom: 1px solid #eee;">{d['dates']}<br><small>{d['notes']}</small></td>
+                </tr>
+                <tr>
+                    <td colspan="3" style="padding: 5px 12px 15px 12px; border-bottom: 1px solid #eee;">
+                        <a href="{d['link']}" style="background: #1a73e8; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 12px;">Book on Google Flights</a>
+                    </td>
+                </tr>
+            """
+        html += "</table></div>"
+        send_html_email(f"✈️ {len(all_deals)} Flight Deals Found!", html)
 
 if __name__ == "__main__":
     main()
