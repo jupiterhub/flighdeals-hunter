@@ -89,9 +89,9 @@ def search_flights(window):
         "arrival_area_id": "/m/02j9z", # Europe
         "outbound_date": window["outbound"].isoformat(),
         "return_date": window["return"].isoformat(),
-        "max_price": 100,
+        "max_price": 150,
         "currency": "GBP",
-        "outbound_times": "05,12",
+        "outbound_times": "09,13",
         "return_times": "14,22",
         "api_key": API_KEY
     }
@@ -136,14 +136,14 @@ def search_duffel_flights(window):
             
             for offer in search.offers:
                 price = float(offer.total_amount)
-                if price <= 100:
+                if price <= 150:
                     out_dep_at = offer.slices[0].segments[0].departing_at
                     ret_dep_at = offer.slices[1].segments[0].departing_at
                     
                     out_hour = int(out_dep_at.split('T')[1].split(':')[0])
                     ret_hour = int(ret_dep_at.split('T')[1].split(':')[0])
                     
-                    if 5 <= out_hour <= 12 and 14 <= ret_hour <= 22:
+                    if 9 <= out_hour <= 13 and 14 <= ret_hour <= 22:
                         results.append({
                             "destination": dest,
                             "price": price,
@@ -157,12 +157,22 @@ def search_duffel_flights(window):
     return results
 
 def main():
-    print("--- Flight Hunter: London to Europe < £100 ---")
+    print("--- Flight Hunter: London to Europe < £150 ---")
     all_windows = get_travel_windows(2026)
     
     bh_windows = [w for w in all_windows if "Bank Holiday" in w["name"]]
     std_windows = [w for w in all_windows if "Standard Weekend" in w["name"]]
-    target_windows = bh_windows + std_windows[:4]
+    
+    # FILTER WINDOWS TO SAVE API CREDITS
+    # 1. Skip standard weekends within the next 14 days (last-minute is rarely < £150)
+    # 2. Take the next 20 standard weekends after that (approx. 5 months ahead)
+    
+    two_weeks_from_now = date.today() + timedelta(days=14)
+    relevant_std_windows = [w for w in std_windows if w["outbound"] >= two_weeks_from_now]
+    target_std_windows = relevant_std_windows[:20]
+    
+    # Always include all future Bank Holidays (even if they are soon, as they are high priority)
+    target_windows = bh_windows + target_std_windows
     
     unique_windows = []
     seen_dates = set()
@@ -171,7 +181,13 @@ def main():
             unique_windows.append(w)
             seen_dates.add(w["outbound"])
 
+    # Calculate search range for the email
+    search_start = min(w["outbound"] for w in unique_windows)
+    search_end = max(w["return"] for w in unique_windows)
+    range_str = f"Searched period: {search_start} to {search_end}"
+
     print(f"Plan: Scanning {len(unique_windows)} travel windows across Google and Duffel.")
+    print(range_str)
     all_deals = {}
     
     for window in unique_windows:
@@ -201,12 +217,12 @@ def main():
                 }
 
     if not all_deals:
-        print("No deals found for under £100.")
-        send_email("🔍 Flight Hunter: No deals found today", 
-                   "The Flight Hunter found no results matching your criteria for the rest of 2026.")
+        print("No deals found for under £150.")
+        body = f"The Flight Hunter found no results matching your criteria (£150 limit, 09:00-13:00 depart, 14:00-22:00 return) for the next 4 weekends or any future bank holidays.\n\n{range_str}"
+        send_email("🔍 Flight Hunter: No deals found today", body)
     else:
         final_list = sorted(all_deals.values(), key=lambda x: (x["window"]["outbound"], x["price"]))
-        email_body = "Flight Hunter Results: London to Europe < £100\n\n"
+        email_body = f"Flight Hunter Results: London to Europe < £150\n{range_str}\n\n"
         email_body += f"{'Destination':<20} {'Price':<10} {'Dates':<25} {'Source'}\n" + "-" * 75 + "\n"
         for deal in final_list:
             date_str = f"{deal['window']['outbound']} - {deal['window']['return']}"
@@ -214,7 +230,7 @@ def main():
             email_body += f"   Booking Link: {deal['link']}\n\n"
         
         print(f"\nFound {len(final_list)} possible deals!")
-        send_email(f"✈️ {len(final_list)} Flight Deals Found for under £100!", email_body)
+        send_email(f"✈️ {len(final_list)} Flight Deals Found for under £150!", email_body)
 
 if __name__ == "__main__":
     main()
