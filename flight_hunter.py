@@ -198,29 +198,44 @@ def main():
     for window in target_windows:
         print(f"Scanning: {window['outbound']}...")
         explore_results = search_google_explore(window)
+        print(f"  Found {len(explore_results)} destinations in Explore.")
         
-        # We only verify the TOP 2 destinations to strictly save API credits
-        verified = False
-        for g_deal in explore_results[:2]:
+        # Filter explore results to only include cities we have IATA codes for
+        valid_deals = []
+        for g_deal in explore_results:
             dest_name = g_deal.get("name", "Unknown")
-            iata_code = CITY_TO_IATA.get(dest_name)
-            
+            # Substring match (e.g. "Paris, France" -> "PAR")
+            iata_code = next((code for city, code in CITY_TO_IATA.items() if city.lower() in dest_name.lower()), None)
             if iata_code:
-                # Deep dive with Google Flights to verify the strict time window and smart budget
-                verified_deal = verify_deal_with_google_flights(window, iata_code)
-                if verified_deal:
-                    all_deals.append({
-                        "dest": dest_name, 
-                        "price": verified_deal['price'], 
-                        "dates": f"{window['outbound']} to {window['return']}",
-                        "notes": window["name"], 
-                        "insight": verified_deal['insight'], 
-                        "source": "Google Flights",
-                        "airline": verified_deal['airline'],
-                        "link": f"https://www.google.com/travel/flights?q=Flights%20to%20{dest_name}%20from%20LON%20on%20{window['outbound']}%20through%20{window['return']}"
-                    })
-                    verified = True
-                    break # Stop at the first verified deal for this weekend to save credits
+                valid_deals.append({"name": dest_name, "iata": iata_code, "price": g_deal.get("flight_price", 9999)})
+        
+        print(f"  Filtered down to {len(valid_deals)} valid European cities.")
+        
+        # Sort by Explore price and take the top 2 to strictly save API credits
+        valid_deals = sorted(valid_deals, key=lambda x: x["price"])
+        
+        verified = False
+        for v_deal in valid_deals[:2]:
+            dest_name = v_deal["name"]
+            iata_code = v_deal["iata"]
+            print(f"  -> Deep diving into {dest_name} ({iata_code})...")
+            
+            # Deep dive with Google Flights to verify the strict time window and smart budget
+            verified_deal = verify_deal_with_google_flights(window, iata_code)
+            if verified_deal:
+                print(f"  ✓ Verified Deal Found for {dest_name} (£{verified_deal['price']})")
+                all_deals.append({
+                    "dest": dest_name, 
+                    "price": verified_deal['price'], 
+                    "dates": f"{window['outbound']} to {window['return']}",
+                    "notes": window["name"], 
+                    "insight": verified_deal['insight'], 
+                    "source": "Google Flights",
+                    "airline": verified_deal['airline'],
+                    "link": f"https://www.google.com/travel/flights?q=Flights%20to%20{dest_name}%20from%20LON%20on%20{window['outbound']}%20through%20{window['return']}"
+                })
+                verified = True
+                break # Stop at the first verified deal for this weekend to save credits
 
     if not all_deals:
         send_html_email("🔍 No Deals Found Today", f"<p>Searched {range_str}. No direct flights matching your Smart Budget, 'low' pricing, and strict timing (Arrive before 16:00) were found.</p>")
