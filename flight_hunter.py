@@ -238,17 +238,17 @@ def main():
     all_windows = get_travel_windows()
 
     # Strategy: Weekly Sunday Scan
-    # Focus on the 4-16 week window (1-4 months) to hit the "31-60 day" price drop sweet spot.
+    # Focus on the 4-12 week window (1-3 months) to hit the "31-60 day" price drop sweet spot.
     four_weeks_out = date.today() + timedelta(weeks=4)
-    sixteen_weeks_out = date.today() + timedelta(weeks=16)
+    twelve_weeks_out = date.today() + timedelta(weeks=12)
     
     bh_windows = [w for w in all_windows if "Bank Holiday" in w["name"] and w["outbound"] >= four_weeks_out]
-    std_windows = [w for w in all_windows if "Standard Weekend" in w["name"] and four_weeks_out <= w["outbound"] <= sixteen_weeks_out]
+    std_windows = [w for w in all_windows if "Standard Weekend" in w["name"] and four_weeks_out <= w["outbound"] <= twelve_weeks_out]
     
     target_windows = sorted(bh_windows + std_windows, key=lambda x: x["outbound"])
 
     if not target_windows:
-        print("No target windows found in the 4-16 week range.")
+        print("No target windows found in the 4-12 week range.")
         return
 
     range_str = f"{target_windows[0]['outbound']} to {target_windows[-1]['return']}"
@@ -273,11 +273,17 @@ def main():
                 if iata_code in visited_cities and current_season in visited_cities[iata_code]:
                     continue
                     
+                # Pre-filter: Don't waste Deep Dive credits if Explore price is already above Smart Budget
+                explore_price = g_deal.get("flight_price", 9999)
+                max_budget = min(150, SMART_BUDGETS.get(iata_code, 150))
+                if explore_price > max_budget:
+                    continue
+                    
                 global_explore_deals.append({
                     "window": window,
                     "name": dest_name,
                     "iata": iata_code,
-                    "price": g_deal.get("flight_price", 9999)
+                    "price": explore_price
                 })
 
     print(f"  Found {len(global_explore_deals)} valid options after season filtering.")
