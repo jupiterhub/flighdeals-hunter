@@ -179,7 +179,14 @@ def verify_deal_with_google_flights(window, dest_iata):
                     pass
             
             airline = outbound.get("airline", "Unknown Airline")
-            return {"price": price, "airline": airline, "insight": price_level or "Budget Match"}
+            
+            # Extract the actual Google Flights search URL directly from SerpApi metadata
+            google_url = results.get("search_metadata", {}).get("google_flights_url", "")
+            if not google_url:
+                # Fallback to standard URL format if missing
+                google_url = f"https://www.google.com/travel/flights?q=Flights%20to%20{dest_iata}%20from%20LON%20on%20{window['outbound']}%20through%20{window['return']}"
+                
+            return {"price": price, "airline": airline, "insight": price_level or "Budget Match", "link": google_url}
             
         return None
     except Exception as e:
@@ -207,6 +214,8 @@ def main():
     print(f"Scanning {len(target_windows)} windows ({range_str})...")
     
     all_deals = []
+    destination_counts = {} # Keep track of how many times a destination is chosen to ensure diversity
+    
     for window in target_windows:
         print(f"Scanning: {window['outbound']}...")
         explore_results = search_google_explore(window)
@@ -223,11 +232,12 @@ def main():
         
         print(f"  Filtered down to {len(valid_deals)} valid European cities.")
         
-        # Sort by Explore price and take the top 2 to strictly save API credits
-        valid_deals = sorted(valid_deals, key=lambda x: x["price"])
+        # DIVERSITY SORT: Add £50 to the "sorting weight" for every time we've already picked this destination
+        # This guarantees we don't just pick Dublin every single weekend if there are other cheap options
+        valid_deals = sorted(valid_deals, key=lambda x: x["price"] + (50 * destination_counts.get(x["name"], 0)))
         
         verified = False
-        for v_deal in valid_deals[:2]:
+        for v_deal in valid_deals[:2]: # Still only check the top 2 (now dynamically diverse) to strictly save API credits
             dest_name = v_deal["name"]
             iata_code = v_deal["iata"]
             print(f"  -> Deep diving into {dest_name} ({iata_code})...")
@@ -244,8 +254,12 @@ def main():
                     "insight": verified_deal['insight'], 
                     "source": "Google Flights",
                     "airline": verified_deal['airline'],
-                    "link": f"https://www.google.com/travel/flights?q=Flights%20to%20{dest_name}%20from%20LON%20on%20{window['outbound']}%20through%20{window['return']}"
+                    "link": verified_deal.get("link", "")
                 })
+                
+                # Increment the count for this destination so it's less likely to be picked next weekend
+                destination_counts[dest_name] = destination_counts.get(dest_name, 0) + 1
+                
                 verified = True
                 break # Stop at the first verified deal for this weekend to save credits
 
