@@ -1,4 +1,5 @@
 import os
+import yaml
 import holidays
 import smtplib
 from email.mime.text import MIMEText
@@ -33,19 +34,30 @@ CITY_TO_IATA = {
     "Sofia": "SOF", "Bucharest": "BUH", "Belgrade": "BEG", "Zagreb": "ZAG",
     "Dubrovnik": "DBV", "Split": "SPU", "Malta": "MLA", "Cyprus": "LCA", 
     "Tenerife": "TFS", "Gran Canaria": "LPA", "Lanzarote": "ACE",
-    "Seville": "SVQ", "Valencia": "VLC", "Bratislava": "BTS", "Ljubljana": "LJU"
+    "Seville": "SVQ", "Valencia": "VLC", "Bratislava": "BTS", "Ljubljana": "LJU",
+    "Bologna": "BLQ", "Innsbruck": "INN"
 }
 
-SMART_BUDGETS = {
-    "ROM": 100, "LIS": 100, "PAR": 80, "AMS": 80, "BCN": 90, "MAD": 90, "PRG": 80, "BER": 80,
-    "CPH": 90, "DUB": 60, "VIE": 90, "BUD": 80, "ATH": 130, "WAW": 80, "KRK": 80, "VCE": 90,
-    "MIL": 80, "NAP": 90, "FLR": 100, "MUC": 90, "FRA": 80, "HAM": 80, "ZRH": 100, "GVA": 90,
-    "BRU": 80, "STO": 100, "OSL": 100, "HEL": 100, "REK": 130, "AGP": 100, "ALC": 90, "FAO": 90,
-    "OPO": 90, "IBZ": 100, "PMI": 90, "NCE": 90, "LYS": 80, "MRS": 80, "TLS": 80, "BOD": 80,
-    "RIX": 80, "TLL": 90, "VNO": 80, "SOF": 80, "BUH": 80, "BEG": 90, "ZAG": 90, "DBV": 100,
-    "SPU": 100, "MLA": 100, "LCA": 130, "TFS": 130, "LPA": 130, "ACE": 130, "SVQ": 90, "VLC": 90,
-    "BTS": 80, "LJU": 90
-}
+# Load Smart Budgets from YAML
+SMART_BUDGETS = {}
+if os.path.exists("smart_budgets.yaml"):
+    try:
+        with open("smart_budgets.yaml", "r") as f:
+            SMART_BUDGETS = yaml.safe_load(f) or {}
+    except Exception as e:
+        print(f"Error loading smart_budgets.yaml: {e}")
+
+def get_season(date_obj):
+    """Returns the meteorological season for a given date."""
+    month = date_obj.month
+    if month in [3, 4, 5]:
+        return "Spring"
+    elif month in [6, 7, 8]:
+        return "Summer"
+    elif month in [9, 10, 11]:
+        return "Autumn"
+    else:
+        return "Winter"
 
 def send_html_email(subject, html_content):
     """Sends a professional HTML email notification."""
@@ -70,23 +82,32 @@ def send_html_email(subject, html_content):
     except Exception as e:
         print(f"Failed to send email: {e}")
 
-def get_travel_windows(year=2026):
-    """Generates Saturday-Sunday and Saturday-Monday (if BH) windows."""
-    uk_holidays = holidays.UnitedKingdom(years=year, subdiv='England')
+def get_travel_windows():
+    """Generates Saturday-Sunday, Friday-Sunday, Saturday-Monday, and Friday-Monday windows."""
+    this_year = date.today().year
     windows = []
-    start_date = max(date.today(), date(year, 1, 1))
-    end_date = date(year, 12, 31)
-    current = start_date
-    while current <= end_date:
-        if current.weekday() == 5: # Saturday
-            saturday = current
-            sunday = saturday + timedelta(days=1)
-            monday = saturday + timedelta(days=2)
-            if monday in uk_holidays:
-                windows.append({"name": f"Bank Holiday: {uk_holidays[monday]}", "outbound": saturday, "return": monday})
-            else:
-                windows.append({"name": "Standard Weekend", "outbound": saturday, "return": sunday})
-        current += timedelta(days=1)
+    
+    for year in [this_year, this_year + 1]:
+        uk_holidays = holidays.UnitedKingdom(years=year, subdiv='England')
+        start_date = max(date.today(), date(year, 1, 1))
+        end_date = date(year, 12, 31)
+        current = start_date
+        while current <= end_date:
+            if current.weekday() == 5: # Saturday
+                saturday = current
+                sunday = saturday + timedelta(days=1)
+                monday = saturday + timedelta(days=2)
+                friday = saturday - timedelta(days=1)
+                
+                if friday in uk_holidays and monday in uk_holidays:
+                    windows.append({"name": f"Bank Holiday: {uk_holidays[friday]} & {uk_holidays[monday]}", "outbound": friday, "return": monday})
+                elif friday in uk_holidays:
+                    windows.append({"name": f"Bank Holiday: {uk_holidays[friday]}", "outbound": friday, "return": sunday})
+                elif monday in uk_holidays:
+                    windows.append({"name": f"Bank Holiday: {uk_holidays[monday]}", "outbound": saturday, "return": monday})
+                else:
+                    windows.append({"name": "Standard Weekend", "outbound": saturday, "return": sunday})
+            current += timedelta(days=1)
     return windows
 
 def search_google_explore(window):
@@ -194,20 +215,40 @@ def verify_deal_with_google_flights(window, dest_iata):
         return None
 
 def main():
-    print("--- Flight Hunter 3.0: Dual SerpApi Mode ---")
-    all_windows = get_travel_windows(2026)
-
+    print("--- Flight Hunter 3.0: Priority Sunday Scan ---")
     
-    # Strategy: Skip next 14 days, scan next 6 weekends + all Bank Holidays (~10 windows total)
-    # 10 windows * 3 calls max (1 explore + 2 deep dives) = 30 credits per run
-    # 30 credits * 8 runs/month (Tue & Thu) = 240 credits/month (Safely under 250 limit)
-    two_weeks_out = date.today() + timedelta(days=14)
-    bh_windows = [w for w in all_windows if "Bank Holiday" in w["name"]]
-    std_windows = [w for w in all_windows if "Standard Weekend" in w["name"] and w["outbound"] >= two_weeks_out]
-    target_windows = sorted(bh_windows + std_windows[:6], key=lambda x: x["outbound"])
+    # Load Visited Cities and Seasons from YAML
+    visited_cities = {}
+    if os.path.exists("visited_cities.yaml"):
+        try:
+            with open("visited_cities.yaml", "r") as f:
+                visited_cities = yaml.safe_load(f) or {}
+        except Exception as e:
+            print(f"Error loading visited_cities.yaml: {e}")
+
+    # Load Priority Cities from YAML (with Seasonal Preferences)
+    priority_cities = {}
+    if os.path.exists("priority_cities.yaml"):
+        try:
+            with open("priority_cities.yaml", "r") as f:
+                priority_cities = yaml.safe_load(f) or {}
+        except Exception as e:
+            print(f"Error loading priority_cities.yaml: {e}")
+
+    all_windows = get_travel_windows()
+
+    # Strategy: Weekly Sunday Scan
+    # Focus on the 4-16 week window (1-4 months) to hit the "31-60 day" price drop sweet spot.
+    four_weeks_out = date.today() + timedelta(weeks=4)
+    sixteen_weeks_out = date.today() + timedelta(weeks=16)
+    
+    bh_windows = [w for w in all_windows if "Bank Holiday" in w["name"] and w["outbound"] >= four_weeks_out]
+    std_windows = [w for w in all_windows if "Standard Weekend" in w["name"] and four_weeks_out <= w["outbound"] <= sixteen_weeks_out]
+    
+    target_windows = sorted(bh_windows + std_windows, key=lambda x: x["outbound"])
 
     if not target_windows:
-        print("No target windows found.")
+        print("No target windows found in the 4-16 week range.")
         return
 
     range_str = f"{target_windows[0]['outbound']} to {target_windows[-1]['return']}"
@@ -220,11 +261,18 @@ def main():
         print(f"Scanning Explore for: {window['outbound']}...")
         explore_results = search_google_explore(window)
         
+        current_season = get_season(window["outbound"])
+        
         for g_deal in explore_results:
             dest_name = g_deal.get("name", "Unknown")
             # Substring match
             iata_code = next((code for city, code in CITY_TO_IATA.items() if city.lower() in dest_name.lower()), None)
+            
             if iata_code:
+                # Exclusion Logic: Skip if city visited in the same season
+                if iata_code in visited_cities and current_season in visited_cities[iata_code]:
+                    continue
+                    
                 global_explore_deals.append({
                     "window": window,
                     "name": dest_name,
@@ -232,56 +280,75 @@ def main():
                     "price": g_deal.get("flight_price", 9999)
                 })
 
-    print(f"  Found {len(global_explore_deals)} valid European options across all weekends.")
+    print(f"  Found {len(global_explore_deals)} valid options after season filtering.")
     
-    # 2. Sort all options globally by price
-    global_explore_deals = sorted(global_explore_deals, key=lambda x: x["price"])
+    # 2. Sort all options globally: Seasonal Priority -> Generic Priority -> Price
+    def get_priority_score(deal):
+        iata = deal["iata"]
+        season = get_season(deal["window"]["outbound"])
+        
+        if iata in priority_cities:
+            preferred_seasons = priority_cities[iata]
+            # Priority 0: Matches preferred season
+            if not preferred_seasons or season in preferred_seasons:
+                return 0
+            # Priority 1: In list but wrong season
+            return 1
+        # Priority 2: Not in priority list
+        return 2
+
+    global_explore_deals = sorted(
+        global_explore_deals, 
+        key=lambda x: (get_priority_score(x), x["price"])
+    )
     
     all_deals = []
     destination_counts = {}
     deep_dives_performed = 0
-    MAX_DEEP_DIVES = 15 # Protect API credits (10 Explore + 15 Deep Dives = 25 credits/run)
-    MAX_PER_DESTINATION = 2 # Only show a specific city twice (for its absolute cheapest weekends)
+    MAX_DEEP_DIVES = 30 # Weekly Strategy: ~45 credits total per Sunday run
+    MAX_PER_DESTINATION = 2 # Only show a specific city twice
     
-    # 3. Deep Dive into the absolute cheapest options first, regardless of weekend
+    # 3. Deep Dive into the absolute cheapest options first
     for e_deal in global_explore_deals:
         if deep_dives_performed >= MAX_DEEP_DIVES:
-            print("  [!] Deep dive limit reached to protect API credits.")
+            print("  [!] Deep dive limit reached.")
             break
             
         dest_name = e_deal["name"]
         
-        # Diversity Check: Have we already found this city enough times?
+        # Diversity Check
         if destination_counts.get(dest_name, 0) >= MAX_PER_DESTINATION:
             continue
             
         iata_code = e_deal["iata"]
         window = e_deal["window"]
         
-        print(f"  -> Deep diving into {dest_name} ({iata_code}) for {window['outbound']} (Explore Price: £{e_deal['price']})...")
+        print(f"  -> Verifying {dest_name} ({iata_code}) for {window['outbound']} (£{e_deal['price']})...")
         deep_dives_performed += 1
         
-        # Deep dive with Google Flights to verify the strict time window and smart budget
         verified_deal = verify_deal_with_google_flights(window, iata_code)
         if verified_deal:
             print(f"  ✓ Verified Deal Found for {dest_name} (£{verified_deal['price']})")
+            
+            is_priority = get_priority_score(e_deal) == 0
+            dest_display = f"⭐ {dest_name}" if is_priority else dest_name
+
             all_deals.append({
-                "dest": dest_name, 
+                "dest": dest_display, 
                 "price": verified_deal['price'], 
                 "dates": f"{window['outbound']} to {window['return']}",
                 "notes": window["name"], 
                 "insight": verified_deal['insight'], 
                 "source": "Google Flights",
                 "airline": verified_deal['airline'],
-                "link": verified_deal.get("link", "")
+                "link": verified_deal.get("link", ""),
+                "is_priority": is_priority
             })
             
-            # Increment the count for this destination
             destination_counts[dest_name] = destination_counts.get(dest_name, 0) + 1
             
-            # Stop if we found a sufficient total number of high-quality deals
-            if len(all_deals) >= 10:
-                print("  [!] Found 10 verified deals. Stopping early.")
+            if len(all_deals) >= 12:
+                print("  [!] Found 12 verified deals. Stopping.")
                 break
 
     if not all_deals:
@@ -289,32 +356,24 @@ def main():
     else:
         # Sort and deduplicate
         all_deals = sorted(all_deals, key=lambda x: x['price'])
+        priority_deals = [d for d in all_deals if d.get('is_priority')]
+        explore_deals = [d for d in all_deals if not d.get('is_priority')]
+        
+        def build_table(deals, title):
+            if not deals: return ""
+            t = f"<h3 style='color: #333; margin-top: 20px; font-size: 16px;'>{title}</h3><table style='width: 100%; border-collapse: collapse;'><tr style='background: #f8f9fa;'><th style='padding: 10px; text-align: left; border-bottom: 2px solid #eee;'>Destination</th><th style='padding: 10px; text-align: left; border-bottom: 2px solid #eee;'>Price</th><th style='padding: 10px; text-align: left; border-bottom: 2px solid #eee;'>Dates</th></tr>"
+            for d in deals[:15]:
+                t += f"<tr><td style='padding: 12px; border-bottom: 1px solid #eee;'><b>{d['dest']}</b><br><small style='color:#999'>{d['airline']}</small></td><td style='padding: 12px; border-bottom: 1px solid #eee;'><span style='color: #28a745; font-weight: bold;'>£{d['price']}</span><br><small>{d['insight']}</small></td><td style='padding: 12px; border-bottom: 1px solid #eee;'>{d['dates']}<br><small>{d['notes']}</small></td></tr><tr><td colspan='3' style='padding: 5px 12px 15px 12px; border-bottom: 1px solid #eee;'><a href='{d['link']}' style='background: #1a73e8; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 12px;'>Book on Google Flights</a></td></tr>"
+            t += "</table>"
+            return t
         
         html = f"""
         <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px;">
-            <h2 style="color: #1a73e8;">✈️ Flight Hunter: Top Deals</h2>
-            <p style="color: #666;">Searching from <b>{range_str}</b><br>Budget: £150 | Direct Flights | 09:00-13:00 Out, 14:00-22:00 Back</p>
-            <table style="width: 100%; border-collapse: collapse;">
-                <tr style="background: #f8f9fa;">
-                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #eee;">Destination</th>
-                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #eee;">Price</th>
-                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #eee;">Dates</th>
-                </tr>
-        """
-        for d in all_deals[:15]: # Show top 15 deals
-            html += f"""
-                <tr>
-                    <td style="padding: 12px; border-bottom: 1px solid #eee;"><b>{d['dest']}</b><br><small style="color:#999">{d['airline']}</small></td>
-                    <td style="padding: 12px; border-bottom: 1px solid #eee;"><span style="color: #28a745; font-weight: bold;">£{d['price']}</span><br><small>{d['insight']}</small></td>
-                    <td style="padding: 12px; border-bottom: 1px solid #eee;">{d['dates']}<br><small>{d['notes']}</small></td>
-                </tr>
-                <tr>
-                    <td colspan="3" style="padding: 5px 12px 15px 12px; border-bottom: 1px solid #eee;">
-                        <a href="{d['link']}" style="background: #1a73e8; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 12px;">Book on Google Flights</a>
-                    </td>
-                </tr>
-            """
-        html += "</table></div>"
+            <h2 style="color: #1a73e8; margin-bottom: 5px;">✈️ Flight Hunter: Weekly Sunday Scan</h2>
+            <p style="color: #666; margin-top: 0;">Searching from <b>{range_str}</b><br>Budget: Smart Budgets (Up to £150) | Hand Luggage Only | Direct Flights<br>Timing: 09:00-13:00 Out, 14:00-22:00 Back</p>
+            {build_table(priority_deals, '⭐ Priority Deals')}
+            {build_table(explore_deals, '💸 Other Great Deals')}
+        </div>"""
         send_html_email(f"✈️ {len(all_deals)} Flight Deals Found!", html)
 
 if __name__ == "__main__":

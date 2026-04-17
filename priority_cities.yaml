@@ -1,0 +1,42 @@
+# Priority cities with their optimal travel seasons.
+# If a deal matches a preferred season, it receives top priority.
+# If no seasons are listed, the city is prioritized year-round.
+# Seasons: Spring, Summer, Autumn, Winter
+
+# --- Western & Southern Europe ---
+ROM: [Spring, Autumn] # Rome, Italy (Avoids summer heat)
+LIS: [Spring, Autumn] # Lisbon, Portugal
+VCE: [Spring, Autumn] # Venice, Italy
+MIL: [Spring, Autumn] # Milan, Italy
+FLR: [Spring, Autumn] # Florence, Italy
+SVQ: [Spring, Autumn] # Seville, Spain (Best before it gets too hot)
+VLC: [Spring, Autumn] # Valencia, Spain
+OPO: [Spring, Summer, Autumn] # Porto, Portugal
+NCE: [Spring, Summer] # Nice, France
+BOD: [Spring, Autumn] # Bordeaux, France (Perfect for wine tasting)
+
+# --- Central Europe ---
+PRG: [Spring, Autumn, Winter] # Prague, Czech Republic (Magical Christmas Markets)
+VIE: [Spring, Autumn, Winter] # Vienna, Austria (Winter Markets)
+BUD: [Spring, Autumn, Winter] # Budapest, Hungary (Thermal baths in Winter)
+BER: [Spring, Summer, Autumn] # Berlin, Germany
+ZRH: [Spring, Summer, Autumn] # Zurich, Switzerland
+GVA: [Summer, Winter] # Geneva, Switzerland (Skiing in Winter, Lake in Summer)
+BRU: [Spring, Autumn, Winter] # Brussels, Belgium
+
+# --- Northern Europe & Baltics ---
+CPH: [Spring, Summer] # Copenhagen, Denmark
+STO: [Spring, Summer] # Stockholm, Sweden
+REK: [Summer, Winter] # Reykjavik, Iceland (Winter for Northern Lights, Summer for Midnight Sun)
+TLL: [Spring, Summer, Winter] # Tallinn, Estonia (Fairy-tale medieval winter)
+
+# --- Eastern Europe & Balkans ---
+WAW: [Spring, Summer, Autumn] # Warsaw, Poland
+KRK: [Spring, Summer, Autumn] # Krakow, Poland
+DBV: [Spring, Autumn] # Dubrovnik, Croatia (Avoid peak summer crowds)
+LJU: [Spring, Summer, Autumn] # Ljubljana, Slovenia (Close to Lake Bled)
+
+# --- Islands & Winter Sun ---
+MLA: [Spring, Autumn] # Malta (Great for shoulder-season warmth)
+TFS: [Winter, Spring, Autumn] # Tenerife, Spain (Top choice for escaping UK winters)
+DUB: [Spring, Summer] # Dublin, Ireland
