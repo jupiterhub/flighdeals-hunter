@@ -213,55 +213,76 @@ def main():
     range_str = f"{target_windows[0]['outbound']} to {target_windows[-1]['return']}"
     print(f"Scanning {len(target_windows)} windows ({range_str})...")
     
-    all_deals = []
-    destination_counts = {} # Keep track of how many times a destination is chosen to ensure diversity
+    # 1. Gather all explore results into a global pool
+    global_explore_deals = []
     
     for window in target_windows:
-        print(f"Scanning: {window['outbound']}...")
+        print(f"Scanning Explore for: {window['outbound']}...")
         explore_results = search_google_explore(window)
-        print(f"  Found {len(explore_results)} destinations in Explore.")
         
-        # Filter explore results to only include cities we have IATA codes for
-        valid_deals = []
         for g_deal in explore_results:
             dest_name = g_deal.get("name", "Unknown")
-            # Substring match (e.g. "Paris, France" -> "PAR")
+            # Substring match
             iata_code = next((code for city, code in CITY_TO_IATA.items() if city.lower() in dest_name.lower()), None)
             if iata_code:
-                valid_deals.append({"name": dest_name, "iata": iata_code, "price": g_deal.get("flight_price", 9999)})
-        
-        print(f"  Filtered down to {len(valid_deals)} valid European cities.")
-        
-        # DIVERSITY SORT: Add £50 to the "sorting weight" for every time we've already picked this destination
-        # This guarantees we don't just pick Dublin every single weekend if there are other cheap options
-        valid_deals = sorted(valid_deals, key=lambda x: x["price"] + (50 * destination_counts.get(x["name"], 0)))
-        
-        verified = False
-        for v_deal in valid_deals[:2]: # Still only check the top 2 (now dynamically diverse) to strictly save API credits
-            dest_name = v_deal["name"]
-            iata_code = v_deal["iata"]
-            print(f"  -> Deep diving into {dest_name} ({iata_code})...")
-            
-            # Deep dive with Google Flights to verify the strict time window and smart budget
-            verified_deal = verify_deal_with_google_flights(window, iata_code)
-            if verified_deal:
-                print(f"  ✓ Verified Deal Found for {dest_name} (£{verified_deal['price']})")
-                all_deals.append({
-                    "dest": dest_name, 
-                    "price": verified_deal['price'], 
-                    "dates": f"{window['outbound']} to {window['return']}",
-                    "notes": window["name"], 
-                    "insight": verified_deal['insight'], 
-                    "source": "Google Flights",
-                    "airline": verified_deal['airline'],
-                    "link": verified_deal.get("link", "")
+                global_explore_deals.append({
+                    "window": window,
+                    "name": dest_name,
+                    "iata": iata_code,
+                    "price": g_deal.get("flight_price", 9999)
                 })
-                
-                # Increment the count for this destination so it's less likely to be picked next weekend
-                destination_counts[dest_name] = destination_counts.get(dest_name, 0) + 1
-                
-                verified = True
-                break # Stop at the first verified deal for this weekend to save credits
+
+    print(f"  Found {len(global_explore_deals)} valid European options across all weekends.")
+    
+    # 2. Sort all options globally by price
+    global_explore_deals = sorted(global_explore_deals, key=lambda x: x["price"])
+    
+    all_deals = []
+    destination_counts = {}
+    deep_dives_performed = 0
+    MAX_DEEP_DIVES = 15 # Protect API credits (10 Explore + 15 Deep Dives = 25 credits/run)
+    MAX_PER_DESTINATION = 2 # Only show a specific city twice (for its absolute cheapest weekends)
+    
+    # 3. Deep Dive into the absolute cheapest options first, regardless of weekend
+    for e_deal in global_explore_deals:
+        if deep_dives_performed >= MAX_DEEP_DIVES:
+            print("  [!] Deep dive limit reached to protect API credits.")
+            break
+            
+        dest_name = e_deal["name"]
+        
+        # Diversity Check: Have we already found this city enough times?
+        if destination_counts.get(dest_name, 0) >= MAX_PER_DESTINATION:
+            continue
+            
+        iata_code = e_deal["iata"]
+        window = e_deal["window"]
+        
+        print(f"  -> Deep diving into {dest_name} ({iata_code}) for {window['outbound']} (Explore Price: £{e_deal['price']})...")
+        deep_dives_performed += 1
+        
+        # Deep dive with Google Flights to verify the strict time window and smart budget
+        verified_deal = verify_deal_with_google_flights(window, iata_code)
+        if verified_deal:
+            print(f"  ✓ Verified Deal Found for {dest_name} (£{verified_deal['price']})")
+            all_deals.append({
+                "dest": dest_name, 
+                "price": verified_deal['price'], 
+                "dates": f"{window['outbound']} to {window['return']}",
+                "notes": window["name"], 
+                "insight": verified_deal['insight'], 
+                "source": "Google Flights",
+                "airline": verified_deal['airline'],
+                "link": verified_deal.get("link", "")
+            })
+            
+            # Increment the count for this destination
+            destination_counts[dest_name] = destination_counts.get(dest_name, 0) + 1
+            
+            # Stop if we found a sufficient total number of high-quality deals
+            if len(all_deals) >= 10:
+                print("  [!] Found 10 verified deals. Stopping early.")
+                break
 
     if not all_deals:
         send_html_email("🔍 No Deals Found Today", f"<p>Searched {range_str}. No direct flights matching your Smart Budget, 'low' pricing, and strict timing (Arrive before 16:00) were found.</p>")
