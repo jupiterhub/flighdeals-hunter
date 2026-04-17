@@ -1,0 +1,15 @@
+# List of cities visited and the seasons they were visited in.
+# Format: 
+# IATA_CODE: [Season1, Season2, ...]
+# Possible Seasons: Spring, Summer, Autumn, Winter
+
+PAR: [Spring, Summer, Autumn, Winter] # Paris, France
+BCN: [Spring, Summer, Autumn, Winter] # Barcelona, Spain
+MAD: [Spring, Summer, Autumn, Winter] # Madrid, Spain
+PMI: [Spring, Summer, Autumn, Winter] # Palma de Mallorca, Spain
+NAP: [Spring, Summer, Autumn, Winter] # Naples, Italy
+BLQ: [Spring, Summer, Autumn, Winter] # Bologna, Italy
+AMS: [Spring, Summer, Autumn, Winter] # Amsterdam, Netherlands
+MUC: [Spring, Summer, Autumn, Winter] # Munich, Germany
+INN: [Spring, Summer, Autumn, Winter] # Innsbruck, Austria
+ATH: [Spring, Summer, Autumn, Winter] # Athens, Greece (Trip Already Planned)

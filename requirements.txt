@@ -2,3 +2,4 @@ google-search-results
 holidays
 python-dotenv
 requests
+PyYAML
