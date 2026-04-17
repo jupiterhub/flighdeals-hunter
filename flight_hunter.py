@@ -17,7 +17,7 @@ SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
-RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL", "your_email@example.com")
+RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 
 CITY_TO_IATA = {
     "Rome": "ROM", "Lisbon": "LIS", "Paris": "PAR", "Amsterdam": "AMS",
@@ -61,8 +61,8 @@ def get_season(date_obj):
 
 def send_html_email(subject, html_content):
     """Sends a professional HTML email notification."""
-    if not all([SENDER_EMAIL, SENDER_PASSWORD]):
-        print("Email not sent: SENDER_EMAIL or SENDER_PASSWORD not set in .env")
+    if not all([SENDER_EMAIL, SENDER_PASSWORD, RECIPIENT_EMAIL]):
+        print("Email not sent: SENDER_EMAIL, SENDER_PASSWORD, or RECIPIENT_EMAIL not set in .env")
         return
 
     msg = MIMEMultipart('alternative')
