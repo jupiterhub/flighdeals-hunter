@@ -99,7 +99,7 @@ def search_google_explore(window):
         "arrival_area_id": "/m/02j9z", # Europe
         "outbound_date": window["outbound"].isoformat(),
         "return_date": window["return"].isoformat(),
-        "max_price": 300, # Increased for testing
+        "max_price": 150,
         "currency": "GBP",
         "api_key": API_KEY
     }
@@ -127,7 +127,7 @@ def verify_deal_with_google_flights(window, dest_iata):
     """Deep dive to check if there is a direct flight in the specific time window using Google Flights API."""
     params = {
         "engine": "google_flights",
-        "departure_id": "/m/04jpl", # London
+        "departure_id": "LON", # Google Flights deep dive works best with IATA code
         "arrival_id": dest_iata,
         "outbound_date": window["outbound"].isoformat(),
         "return_date": window["return"].isoformat(),
@@ -146,21 +146,21 @@ def verify_deal_with_google_flights(window, dest_iata):
         price_insights = results.get("price_insights", {})
         price_level = price_insights.get("price_level")
         
-        # Determine the budget for this specific city (Increased for testing)
-        max_budget = min(300, SMART_BUDGETS.get(dest_iata, 150) + 150)
+        # Determine the budget for this specific city
+        max_budget = min(150, SMART_BUDGETS.get(dest_iata, 150))
         
         flights = results.get("best_flights", []) + results.get("other_flights", [])
         
         for flight in flights:
             price = flight.get("price", 9999)
             
-            # 1. Price must be under the test budget
+            # 1. Price must be under the strict smart budget
             if price > max_budget:
                 continue
                 
-            # 2. Disabled 'low' filter for testing so we can see *any* flights
-            # if price_level and price_level != "low":
-            #     continue
+            # 2. Strict 'low' filter enabled: Trust Google if it provides an insight
+            if price_level and price_level != "low":
+                 continue
 
             legs = flight.get("flights", [])
             if not legs:
@@ -179,7 +179,7 @@ def verify_deal_with_google_flights(window, dest_iata):
                     pass
             
             airline = outbound.get("airline", "Unknown Airline")
-            return {"price": price, "airline": airline, "insight": price_level or "Test Mode"}
+            return {"price": price, "airline": airline, "insight": price_level or "Budget Match"}
             
         return None
     except Exception as e:
@@ -187,7 +187,7 @@ def verify_deal_with_google_flights(window, dest_iata):
         return None
 
 def main():
-    print("--- Flight Hunter 3.0: Dual SerpApi Mode (TESTING) ---")
+    print("--- Flight Hunter 3.0: Dual SerpApi Mode ---")
     all_windows = get_travel_windows(2026)
 
     
