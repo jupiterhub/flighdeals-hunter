@@ -155,8 +155,8 @@ def verify_deal_with_google_flights(window, dest_iata):
         "currency": "GBP",
         "hl": "en",
         "type": "1", # Round trip
-        "outbound_times": "09,13",
-        "return_times": "14,22",
+        "outbound_times": "08,14", # 08:00 to 14:00 (Ensures you aren't leaving too early)
+        "return_times": "14,20", # 14:00 to 20:00 (Return in the afternoon/evening)
         "api_key": API_KEY
     }
     try:
@@ -179,8 +179,8 @@ def verify_deal_with_google_flights(window, dest_iata):
             if price > max_budget:
                 continue
                 
-            # 2. Strict 'low' filter enabled: Trust Google if it provides an insight
-            if price_level and price_level != "low":
+            # 2. Filter out 'high' prices. Accept 'low', 'typical', or missing insight.
+            if price_level == "high":
                  continue
 
             legs = flight.get("flights", [])
@@ -352,7 +352,7 @@ def main():
                 break
 
     if not all_deals:
-        send_html_email("🔍 No Deals Found Today", f"<p>Searched {range_str}. No direct flights matching your Smart Budget, 'low' pricing, and strict timing (Arrive before 16:00) were found.</p>")
+        send_html_email("🔍 No Deals Found Today", f"<p>Searched {range_str}. No direct flights matching your Smart Budget, 'low'/'typical' pricing, and strict timing (08:00-14:00 Out, 14:00-20:00 Back) were found.</p>")
     else:
         # Sort and deduplicate
         all_deals = sorted(all_deals, key=lambda x: x['price'])
@@ -370,7 +370,7 @@ def main():
         html = f"""
         <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px;">
             <h2 style="color: #1a73e8; margin-bottom: 5px;">✈️ Flight Hunter: Weekly Sunday Scan</h2>
-            <p style="color: #666; margin-top: 0;">Searching from <b>{range_str}</b><br>Budget: Smart Budgets (Up to £150) | Hand Luggage Only | Direct Flights<br>Timing: 09:00-13:00 Out, 14:00-22:00 Back</p>
+            <p style="color: #666; margin-top: 0;">Searching from <b>{range_str}</b><br>Budget: Smart Budgets (Up to £150) | Hand Luggage Only | Direct Flights<br>Timing: 08:00-14:00 Out, 14:00-20:00 Back</p>
             {build_table(priority_deals, '⭐ Priority Deals')}
             {build_table(explore_deals, '💸 Other Great Deals')}
         </div>"""
